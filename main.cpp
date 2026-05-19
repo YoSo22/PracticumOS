@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <vector>
 #include <algorithm>
 #include <stack>
@@ -239,11 +240,12 @@ void UpdateListView() {
         LVCOLUMNW lvc = {0};
         lvc.mask = LVCF_WIDTH | LVCF_TEXT;
         lvc.cx = 400; // Широкая колонка
-        lvc.pszText = L"Карточка студента";
+        lvc.pszText = (wchar_t*)L"Карточка студента";
         ListView_InsertColumn(g_hListView, 0, &lvc);
         
         // Удаляем лишние колонки если были
-        for (int i = ListView_GetColumnCount(g_hListView) - 1; i > 0; --i) {
+        int colCount = (int)SendMessage(g_hListView, LVM_GETCOLUMNCOUNT, 0, 0);
+        for (int i = colCount - 1; i > 0; --i) {
             ListView_DeleteColumn(g_hListView, i);
         }
 
@@ -270,8 +272,10 @@ void UpdateListView() {
         int widths[] = { 40, 200, 80, 40, 40, 40, 40, 40, 70 };
 
         // Очищаем старые колонки
-        while (ListView_GetColumnCount(g_hListView) > 0) {
+        int colCount2 = (int)SendMessage(g_hListView, LVM_GETCOLUMNCOUNT, 0, 0);
+        while (colCount2 > 0) {
             ListView_DeleteColumn(g_hListView, 0);
+            colCount2--;
         }
 
         for (int i = 0; i < 9; ++i) {
@@ -412,149 +416,125 @@ INT_PTR CALLBACK StudentDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
     return FALSE;
 }
 
+// Глобальные переменные для диалога
+HWND g_hDlgWnd = NULL;
+int g_dlgTargetIndex = -1;
+
+LRESULT CALLBACK DlgWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_CREATE: {
+        CreateWindowExW(0, L"STATIC", L"ФИО:", WS_CHILD | WS_VISIBLE, 10, 10, 50, 20, hWnd, NULL, NULL, NULL);
+        HWND hFio = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 70, 10, 200, 25, hWnd, (HMENU)IDC_EDIT_FIO, NULL, NULL);
+        
+        CreateWindowExW(0, L"STATIC", L"Зачетка:", WS_CHILD | WS_VISIBLE, 10, 45, 60, 20, hWnd, NULL, NULL, NULL);
+        HWND hBook = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER, 70, 45, 100, 25, hWnd, (HMENU)IDC_EDIT_BOOK, NULL, NULL);
+
+        const wchar_t* labels[] = {L"О1:", L"О2:", L"О3:", L"О4:", L"О5:"};
+        for(int i=0; i<5; ++i) {
+            CreateWindowExW(0, L"STATIC", labels[i], WS_CHILD | WS_VISIBLE, 10 + (i*60), 80, 30, 20, hWnd, NULL, NULL, NULL);
+            CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_CENTER | ES_NUMBER, 
+                40 + (i*60), 80, 40, 25, hWnd, (HMENU)(IDC_EDIT_G1 + i), NULL, NULL);
+        }
+
+        CreateWindowExW(0, L"BUTTON", L"Сохранить", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 
+            100, 130, 100, 30, hWnd, (HMENU)IDOK_SAVE, NULL, NULL);
+        CreateWindowExW(0, L"BUTTON", L"Отмена", WS_CHILD | WS_VISIBLE, 
+            220, 130, 100, 30, hWnd, (HMENU)IDCANCEL_CLOSE, NULL, NULL);
+
+        // Заполнение данными
+        if (g_dlgTargetIndex != -1 && g_dlgTargetIndex < (int)g_students.size()) {
+            Student& s = g_students[g_dlgTargetIndex];
+            SetWindowTextW(hFio, s.fullName);
+            wchar_t buf[20];
+            swprintf(buf, 20, L"%d", s.recordBookNumber);
+            SetWindowTextW(hBook, buf);
+            for(int i=0; i<5; ++i) {
+                swprintf(buf, 20, L"%d", s.grades[i]);
+                SetWindowTextW(GetDlgItem(hWnd, IDC_EDIT_G1+i), buf);
+            }
+            SetWindowTextW(GetDlgItem(hWnd, IDOK_SAVE), L"Изменить");
+        } else {
+             SetWindowTextW(GetDlgItem(hWnd, IDOK_SAVE), L"Добавить");
+             SetFocus(hFio);
+        }
+        SendMessage(hFio, WM_SETFONT, (WPARAM)g_hFont, TRUE);
+        return 0;
+    }
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDOK_SAVE) {
+            wchar_t buf[256];
+            Student s;
+            HWND hFio = GetDlgItem(hWnd, IDC_EDIT_FIO);
+            GetWindowTextW(hFio, s.fullName, 100);
+            if (wcslen(s.fullName) == 0) { MessageBoxW(hWnd, L"Введите ФИО", L"Ошибка", MB_ICONWARNING); return 0; }
+            
+            GetWindowTextW(GetDlgItem(hWnd, IDC_EDIT_BOOK), buf, 20);
+            s.recordBookNumber = _wtoi(buf);
+
+            bool ok = true;
+            for (int i = 0; i < 5; ++i) {
+                GetWindowTextW(GetDlgItem(hWnd, IDC_EDIT_G1 + i), buf, 10);
+                int val = _wtoi(buf);
+                if (val < 2 || val > 5) { MessageBoxW(hWnd, L"Оценки 2-5", L"Ошибка", MB_ICONWARNING); ok = false; break; }
+                s.grades[i] = val;
+            }
+            if (ok) {
+                if (g_dlgTargetIndex != -1 && g_dlgTargetIndex < (int)g_students.size()) g_students[g_dlgTargetIndex] = s;
+                else g_students.push_back(s);
+                SaveStudentsToFile(g_currentFile);
+                UpdateListView();
+                DestroyWindow(hWnd);
+            }
+            return 0;
+        } else if (LOWORD(wParam) == IDCANCEL_CLOSE) {
+            DestroyWindow(hWnd);
+            return 0;
+        }
+        break;
+    case WM_DESTROY:
+        g_hDlgWnd = NULL;
+        return 0;
+    }
+    return DefWindowProcW(hWnd, msg, wParam, lParam);
+}
+
 void ShowStudentDialog(int index) {
-    // Создаем диалог программно, так как .rc файла нет
-    // Используем шаблон DLGTEMPLATE в памяти или создаем окна вручную через CreateWindowEx в модальном режиме?
-    // Проще сделать свое модальное окно-потомок.
-    
-    // Для полноценного WinAPI без rc ресурса, создадим простое окно-диалог
     HINSTANCE hInst = GetModuleHandle(NULL);
     
-    // Шаблон диалога в памяти (упрощенно через создание окон)
-    // Чтобы не усложнять код бинарными шаблонами, создадим обычное окно с стилем DS_MODALFRAME
-    
-    // Но так как у нас нет ресурса, реализуем диалог через создание дочерних контролов на временном окне
-    // Это слишком громоздко для одного ответа. 
-    // Альтернатива: Используем стандартный MessageBox для ввода? Нет, нужно много полей.
-    // Решение: Создадим окно "на лету" с классом #32770 (dialog), но проще сделать свою процедуру.
-    
-    // Вернемся к варианту с DialogBoxParam, но нам нужен ресурс.
-    // Так как ресурса нет, мы НЕ МОЖЕМ использовать DialogBoxParam напрямую без .rc или создания шаблона в памяти.
-    // Создание шаблона в памяти (DLGTEMPLATE) сложно и подвержено ошибкам выравнивания.
-    
-    // ПЛАН Б: Создаем обычное окно (CreateWindowEx) с флагом WS_POPUP | WS_CAPTION | WS_SYSMODAL, 
-    // которое ведет себя как диалог.
-    
-    class LocalDialog {
-    public:
-        static HWND hDlg;
-        static int targetIndex;
-        static LRESULT CALLBACK DlgWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-            switch (msg) {
-            case WM_CREATE: {
-                CreateWindowExW(0, L"STATIC", L"ФИО:", WS_CHILD | WS_VISIBLE, 10, 10, 50, 20, hWnd, NULL, NULL, NULL);
-                HWND hFio = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 70, 10, 200, 25, hWnd, (HMENU)IDC_EDIT_FIO, NULL, NULL);
-                
-                CreateWindowExW(0, L"STATIC", L"Зачетка:", WS_CHILD | WS_VISIBLE, 10, 45, 60, 20, hWnd, NULL, NULL, NULL);
-                HWND hBook = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER, 70, 45, 100, 25, hWnd, (HMENU)IDC_EDIT_BOOK, NULL, NULL);
-
-                const wchar_t* labels[] = {L"О1:", L"О2:", L"О3:", L"О4:", L"О5:"};
-                for(int i=0; i<5; ++i) {
-                    CreateWindowExW(0, L"STATIC", labels[i], WS_CHILD | WS_VISIBLE, 10 + (i*60), 80, 30, 20, hWnd, NULL, NULL, NULL);
-                    CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_CENTER | ES_NUMBER, 
-                        40 + (i*60), 80, 40, 25, hWnd, (HMENU)(IDC_EDIT_G1 + i), NULL, NULL);
-                }
-
-                CreateWindowExW(0, L"BUTTON", L"Сохранить", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 
-                    100, 130, 100, 30, hWnd, (HMENU)IDOK_SAVE, NULL, NULL);
-                CreateWindowExW(0, L"BUTTON", L"Отмена", WS_CHILD | WS_VISIBLE, 
-                    220, 130, 100, 30, hWnd, (HMENU)IDCANCEL_CLOSE, NULL, NULL);
-
-                // Заполнение данными
-                if (targetIndex != -1 && targetIndex < (int)g_students.size()) {
-                    Student& s = g_students[targetIndex];
-                    SetWindowTextW(hFio, s.fullName);
-                    wchar_t buf[20];
-                    swprintf(buf, 20, L"%d", s.recordBookNumber);
-                    SetWindowTextW(hBook, buf);
-                    for(int i=0; i<5; ++i) {
-                        swprintf(buf, 20, L"%d", s.grades[i]);
-                        SetWindowTextW(GetDlgItem(hWnd, IDC_EDIT_G1+i), buf);
-                    }
-                    SetWindowTextW(GetDlgItem(hWnd, IDOK_SAVE), L"Изменить");
-                } else {
-                     SetWindowTextW(GetDlgItem(hWnd, IDOK_SAVE), L"Добавить");
-                     SetFocus(hFio);
-                }
-                SendMessage(hFio, WM_SETFONT, (WPARAM)g_hFont, TRUE);
-                // ... установить шрифт остальным ...
-                return 0;
-            }
-            case WM_COMMAND:
-                if (LOWORD(wParam) == IDOK_SAVE) {
-                    // Логика сохранения (дублируем логику выше для краткости примера, в реальном коде вынести в функцию)
-                    wchar_t buf[256];
-                    Student s;
-                    HWND hFio = GetDlgItem(hWnd, IDC_EDIT_FIO);
-                    GetWindowTextW(hFio, s.fullName, 100);
-                    if (wcslen(s.fullName) == 0) { MessageBoxW(hWnd, L"Введите ФИО", L"Ошибка", MB_ICONWARNING); return 0; }
-                    
-                    GetWindowTextW(GetDlgItem(hWnd, IDC_EDIT_BOOK), buf, 20);
-                    s.recordBookNumber = _wtoi(buf);
-
-                    bool ok = true;
-                    for (int i = 0; i < 5; ++i) {
-                        GetWindowTextW(GetDlgItem(hWnd, IDC_EDIT_G1 + i), buf, 10);
-                        int val = _wtoi(buf);
-                        if (val < 2 || val > 5) { MessageBoxW(hWnd, L"Оценки 2-5", L"Ошибка", MB_ICONWARNING); ok = false; break; }
-                        s.grades[i] = val;
-                    }
-                    if (ok) {
-                        if (targetIndex != -1 && targetIndex < (int)g_students.size()) g_students[targetIndex] = s;
-                        else g_students.push_back(s);
-                        SaveStudentsToFile(g_currentFile);
-                        UpdateListView();
-                        DestroyWindow(hWnd);
-                    }
-                    return 0;
-                } else if (LOWORD(wParam) == IDCANCEL_CLOSE) {
-                    DestroyWindow(hWnd);
-                    return 0;
-                }
-                break;
-            case WM_DESTROY:
-                PostQuitMessage(0); // Не совсем правильно для модального, но для простоты сойдет, если цикл сообщений свой
-                // На самом деле, для модального окна нужен свой цикл сообщений или DisableOwner
-                return 0;
-            }
-            return DefWindowProcW(hWnd, msg, wParam, lParam);
-        }
-    };
-
     // Регистрация класса для диалога
     WNDCLASSEXW wc = {0};
     wc.cbSize = sizeof(WNDCLASSEXW);
-    wc.lpfnWndProc = LocalDialog::DlgWndProc;
-    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpfnWndProc = DlgWndProc;
+    wc.hInstance = hInst;
     wc.lpszClassName = L"StudentDlgClass";
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW+1);
     RegisterClassExW(&wc);
 
-    LocalDialog::targetIndex = index;
+    g_dlgTargetIndex = index;
     
     // Создаем модальное окно
     HWND hParent = g_hMainWnd;
     EnableWindow(hParent, FALSE);
     
-    LocalDialog::hDlg = CreateWindowExW(
+    g_hDlgWnd = CreateWindowExW(
         WS_EX_DLGMODALFRAME,
         L"StudentDlgClass",
         index == -1 ? L"Добавление студента" : L"Редактирование студента",
         WS_POPUP | WS_CAPTION | WS_SYSMENU,
         CW_USEDEFAULT, CW_USEDEFAULT, 350, 180,
-        hParent, NULL, wc.hInstance, NULL
+        hParent, NULL, hInst, NULL
     );
     
-    ShowWindow(LocalDialog::hDlg, SW_SHOW);
-    UpdateWindow(LocalDialog::hDlg);
+    ShowWindow(g_hDlgWnd, SW_SHOW);
+    UpdateWindow(g_hDlgWnd);
 
     // Модальный цикл сообщений
     MSG msg;
     BOOL bRet;
     while ((bRet = GetMessage(&msg, NULL, 0, 0)) != 0) {
         if (bRet == -1) break;
-        if (msg.hwnd == LocalDialog::hDlg || IsChild(LocalDialog::hDlg, msg.hwnd)) {
+        if (msg.hwnd == g_hDlgWnd || IsChild(g_hDlgWnd, msg.hwnd)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         } else {
@@ -562,12 +542,12 @@ void ShowStudentDialog(int index) {
             DispatchMessage(&msg);
         }
         // Если окно диалога уничтожено, выходим
-        if (!IsWindow(LocalDialog::hDlg)) break;
+        if (g_hDlgWnd == NULL) break;
     }
     
     EnableWindow(hParent, TRUE);
     SetForegroundWindow(hParent);
-    UnregisterClassW(L"StudentDlgClass", wc.hInstance);
+    UnregisterClassW(L"StudentDlgClass", hInst);
 }
 
 void DeleteSelectedStudent() {
@@ -736,7 +716,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 // --- Точка входа ---
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
-    InitCommonControlsEx(&(INITCOMMONCONTROLSEX){sizeof(INITCOMMONCONTROLSEX), ICC_LISTVIEW_CLASSES});
+    INITCOMMONCONTROLSEX icex;
+    icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+    icex.dwICC = ICC_LISTVIEW_CLASSES;
+    InitCommonControlsEx(&icex);
 
     WNDCLASSEXW wc = {0};
     wc.cbSize = sizeof(WNDCLASSEXW);
