@@ -1,7 +1,27 @@
 ```
-# Qt/Pro files
+# Qt/MOC generated files
+*.moc
+*.moc.cpp
+*.ui.h
+*.qrc.cpp
+
+# Build artifacts
+build/
 *.pro.user
 *.pro.user.*
-*.qbs.user
-*.qbs.user.*
+*.pri~
+
+# Dependencies
+*.so
+*.dylib
+*.dll
+
+# IDE
+.vscode/
+.idea/
+
+# Temp files
+*.tmp
+*.log
+*~
 ```

@@ -1,17 +1,24 @@
-QT -= gui
+QT += core gui widgets
 
-CONFIG += c++17 console
-CONFIG -= app_bundle
-
-# Определить операционную систему
-win32 {
-    DEFINES += _WINDOWS
-    LIBS += -luser32 -lgdi32 -lcomctl32 -lcomdlg32 -lshlwapi -lole32
-}
+greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 TARGET = student_manager
+TEMPLATE = app
 
-SOURCES += main.cpp
+SOURCES += \
+    main.cpp \
+    mainwindow.cpp \
+    studentdialog.cpp \
+    student.cpp
 
-# Для Windows подсистема windows (без консоли)
-win32:QMAKE_LFLAGS += -mwindows
+HEADERS += \
+    mainwindow.h \
+    studentdialog.h \
+    student.h
+
+DEFINES += QT_DEPRECATED_WARNINGS
+
+# Default rules for deployment
+qnx: target.path = /tmp/$${TARGET}/bin
+else: unix:!android: target.path = /opt/$${TARGET}/bin
+!isEmpty(target.path): INSTALLS += target
